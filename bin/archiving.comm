@@ -1,0 +1,58 @@
+#! /usr/bin/env python
+
+"""Check that two trees represent an archive of one another.
+
+It makes sure that there are no leaf non-directory paths with the same name in both trees.
+
+Any files in common are printed once, with paths relative to either root.
+
+If there are any files in common, exit status is 0.
+If there are no files in common, exit status is 1.
+If you get command line syntax wrong, exit status is 2.
+"""
+
+import sys
+import argparse
+import os
+import subprocess
+
+def main(options):
+    """Main program."""
+    def not_both_directories(c):
+        left_path = os.path.join(options.left_path, c)
+        right_path = os.path.join(options.right_path, c)
+        return not (os.path.isdir(left_path) and os.path.isdir(right_path))
+
+    left_files = set(get_relative_file_list(options.left_path))
+    right_files = set(get_relative_file_list(options.right_path))
+    common_files = sorted(left_files & right_files)
+    common_files = filter(not_both_directories, common_files)
+    sys.stdout.writelines(f+"\n" for f in common_files)
+    if common_files:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+    return
+
+def get_relative_file_list(path):
+    cmd = ['find', '.', '-depth', '-print']
+    find_output = subprocess.check_output(cmd, cwd=path)
+    lines = find_output.split('\n')
+    lines = [line for line in lines if line and line != '.']
+    lines = [line.strip('./') for line in lines]
+    return lines
+
+def get_options():
+    """Get options for the script."""
+    parser = argparse.ArgumentParser(
+               description="print relative paths to files common to two directories (excluding directories)",
+             )
+    
+    parser.add_argument('left_path', help="one of the directories, usually your working copy")
+    parser.add_argument('right_path', help="the other directory, usually your archive")
+    options = parser.parse_args()
+    # extra processing of options here
+    return options
+
+if __name__ == "__main__":
+    main(get_options())

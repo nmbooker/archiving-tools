@@ -1,0 +1,135 @@
+#! /usr/bin/env python
+# vim: filetype=python
+
+"""Archive a file or tree from working_path into archive_path.
+
+The premise here is that the directory structure remains the same in both 
+the 'working path' and the 'archive path'.
+So when you archive /home/fred/Documents/foo.txt, it gets moved to
+the equivalent location in the archive path:
+ /archive/fred/Documents/foo.txt
+"""
+
+# TODO: Enable unarchiving (with perhaps -u) from archive tree back into working tree.
+
+import sys
+import argparse
+import os
+import shutil
+
+def main(options):
+    """Main program."""
+    archiver = TreeArchiver(options)
+    archiver.doit()
+    return
+
+
+class TreeArchiver(object):
+    def __init__(self, options):
+        self.options = options
+        self.working_path = options.working_path
+        self.archive_path = options.archive_path
+        self.source_path = self.options.path
+        self.source_abspath = os.path.abspath(self.source_path)
+
+    def source_is_in_correct_subtree(self):
+        """Return True if the path specified is in the correct source tree.
+        """
+        return self.source_abspath.startswith(self.source_root())
+
+    def doit(self):
+        """Do the deed (only works for an individual file at the moment)."""
+        if self.options.dry_run:
+            warning = "Warning: Dry run specified with -d.  Nothing will really happen."
+            if not self.options.verbose:
+                warning += "  Use -d -v to see what would happen."
+            warning += "\n"
+            sys.stderr.write(warning)
+        if not self.source_is_in_correct_subtree():
+            sys.stderr.write("Error: specified path (%s) is not under working path (%s)\n" % (self.source_path, self.working_path))
+            sys.exit(1)
+
+        if not os.path.exists(self.source_abspath):
+            sys.stderr.write("Error: file %s does not exist.\n" % self.source_abspath)
+            sys.exit(3)
+        if os.path.isdir(self.source_abspath) and not self.options.recursive:
+            raise StandardError("Source is directory.  Use -r with care to enable moving directories.")
+        symlink = self.source_dirpath_contains_symlinks()
+        if symlink:
+            sys.stderr.write("Error: part of source path is symlink: %s\n" % symlink)
+            sys.exit(3)
+        dest_parent = os.path.dirname(self.dest_path())
+        if not os.path.exists(dest_parent):
+            self.progress("MKDIR %s\n" % dest_parent)
+            if not self.options.dry_run:
+                os.makedirs(dest_parent)
+        self.progress("MOVE %s  =>  %s\n" % (self.source_abspath, self.dest_path()))
+        if not self.options.dry_run:
+            shutil.move(self.source_abspath, self.dest_path())
+
+    def progress(self, message):
+        """Show progress."""
+        if self.options.verbose:
+            if self.options.dry_run:
+                message = "DRY RUN: " + message
+            sys.stderr.write(message)
+
+    def dest_path(self):
+        """Return the destination path.
+        """
+        return os.path.join(self.dest_root(), self.relative_source_path())
+
+    def relative_source_path(self):
+        """Return the source path relative to the source root.
+
+        e.g. if the source root (working_path) is /data/sfnick/home,
+             and the absolute source path is /data/sfnick/home/xisl/foo,
+             then this would return 'xisl/foo'
+        """
+        return os.path.relpath(self.source_abspath, self.source_root())
+
+    def source_root(self):
+        return self.working_path
+
+    def dest_root(self):
+        return self.archive_path
+
+    def source_dirpath_contains_symlinks(self):
+        """Return part of directory path that is a symlink, else None.
+        """
+        dirname, tail = os.path.split(self.source_abspath)
+        while tail:
+            if os.path.islink(dirname):
+                return dirname
+            dirname, tail = os.path.split(dirname)
+        return None
+
+
+def get_options():
+    """Get options for the script."""
+    parser = argparse.ArgumentParser(
+               description="archive a file into work archive",
+             )
+    parser.add_argument('path', help='path to file to archive')
+    parser.add_argument('-d', '--dry-run', action='store_true', default=False, help='only print what would be moved where - don\'t do it for real')
+    parser.add_argument('-v', '--verbose', action='store_true', default=False, help='output actions on stderr before doing them')
+    parser.add_argument('-w', '--working-root', default=None, help='root of working tree')
+    parser.add_argument('-a', '--archive-root', default=None, help='root of archive tree')
+    parser.add_argument('-r', '--recursive', default=False, action='store_true', help='allow a whole tree to be moved')
+
+    options = parser.parse_args()
+
+    if options.working_root is None:
+        options.working_path = os.environ['ARCHIVING_WORKING_ROOT']
+    else:
+        options.working_path = options.working_root
+
+    if options.archive_root is None:
+        options.archive_path = os.environ['ARCHIVING_ARCHIVE_ROOT']
+    else:
+        options.archive_path = options.archive_root
+
+    return options
+
+if __name__ == "__main__":
+    main(get_options())
